@@ -1,0 +1,388 @@
+import { useState } from "react";
+ 
+// ─── Constants ────────────────────────────────────────────────────────────────
+ 
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const DAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+ 
+const WORKOUT = {
+  long_run:     { label: "Long Run",        icon: "🏃", color: "#2563eb", bg: "#dbeafe", border: "#93c5fd" },
+  quality:      { label: "Intervals",       icon: "⚡", color: "#ea580c", bg: "#ffedd5", border: "#fdba74" },
+  easy_run:     { label: "Easy Run",        icon: "🌿", color: "#16a34a", bg: "#dcfce7", border: "#86efac" },
+  gym_strength: { label: "Gym · Strength",  icon: "🏋️", color: "#7c3aed", bg: "#ede9fe", border: "#c4b5fd" },
+  gym_mobility: { label: "Gym · Mobility",  icon: "🧘", color: "#0891b2", bg: "#e0f2fe", border: "#7dd3fc" },
+  rest:         { label: "Rest",            icon: "💤", color: "#64748b", bg: "#f1f5f9", border: "#cbd5e1" },
+};
+ 
+// ─── Generator (pure logic — no React) ───────────────────────────────────────
+ 
+function generatePlan({
+  currentVolume, goalVolume, progressionRate,
+  longRunDay, qualityDay, restDay,
+  swapGymOrder, gym1Type, gym2Type,
+}) {
+  const longIdx = DAYS.indexOf(longRunDay);
+  const qualIdx = DAYS.indexOf(qualityDay);
+  const restIdx = DAYS.indexOf(restDay);
+ 
+  // ── 16-week volume curve ───────────────────────────────────────────────────
+  // 3 build weeks → 1 recovery week at 70% of last build week → repeat
+  let buildVolume     = currentVolume;
+  let lastBuildVolume = currentVolume;
+  const weekVolumes   = [];
+ 
+  for (let w = 0; w < 16; w++) {
+    const isRecovery = (w + 1) % 4 === 0;
+    if (isRecovery) {
+      weekVolumes.push({ volume: Math.round(lastBuildVolume * 0.70 * 10) / 10, isRecovery: true });
+    } else {
+      lastBuildVolume = buildVolume;
+      weekVolumes.push({ volume: Math.round(buildVolume * 10) / 10, isRecovery: false });
+      buildVolume = Math.min(
+        Math.round(buildVolume * (1 + progressionRate / 100) * 10) / 10,
+        goalVolume
+      );
+    }
+  }
+ 
+  // ── Day slotting ───────────────────────────────────────────────────────────
+  // Anchors: longRunDay, qualityDay, restDay (user-chosen, never touched)
+  // Remaining 4 days → 2 gym + 1–2 easy runs
+  //
+  // Default order (swapGymOrder = false):
+  //   • Day after quality   → gym 1  (legs too tired for another run)
+  //   • Day before long run → easy   (preserve legs for the long effort)
+  //
+  // Swapped order (swapGymOrder = true):
+  //   • Day after quality   → easy   (lighter recovery day)
+  //   • Day before long run → gym 1  (mobility/activation before long effort)
+  //
+  // Then: fill remaining slots with gym 2 (no back-to-back), then easy.
+ 
+  const remaining     = [0, 1, 2, 3, 4, 5, 6].filter(
+    (i) => i !== longIdx && i !== qualIdx && i !== restIdx
+  );
+  const dayAfterQual  = (qualIdx + 1) % 7;
+  const dayBeforeLong = (longIdx + 6) % 7;
+ 
+  const gymDays  = new Set();
+  const easyDays = new Set();
+  let   priorityGymDay = null; // tracks which slot gets gym1Type
+ 
+  const adjacentToGym = (idx) =>
+    gymDays.has((idx + 1) % 7) || gymDays.has((idx + 6) % 7);
+ 
+  if (!swapGymOrder) {
+    // Default: after quality → gym, before long → easy
+    if (remaining.includes(dayAfterQual)) {
+      gymDays.add(dayAfterQual);
+      priorityGymDay = dayAfterQual;
+    }
+    if (remaining.includes(dayBeforeLong) && !gymDays.has(dayBeforeLong))
+      easyDays.add(dayBeforeLong);
+  } else {
+    // Swapped: after quality → easy, before long → gym
+    if (remaining.includes(dayAfterQual))
+      easyDays.add(dayAfterQual);
+    if (remaining.includes(dayBeforeLong) && !easyDays.has(dayBeforeLong)) {
+      gymDays.add(dayBeforeLong);
+      priorityGymDay = dayBeforeLong;
+    }
+  }
+ 
+  // Fill the remaining 2 slots: gym 2 first (no back-to-back), then easy
+  for (const idx of remaining) {
+    if (gymDays.has(idx) || easyDays.has(idx)) continue;
+    if (gymDays.size < 2 && !adjacentToGym(idx)) {
+      gymDays.add(idx);
+      if (priorityGymDay === null) priorityGymDay = idx; // fallback if priority slot wasn't free
+    } else {
+      easyDays.add(idx);
+    }
+  }
+ 
+  // ── Build the plan ─────────────────────────────────────────────────────────
+  return weekVolumes.map(({ volume, isRecovery }, w) => {
+    const qualityKm  = Math.round(volume * 0.20 * 10) / 10;
+    const longRunKm  = Math.round(volume * 0.30 * 10) / 10;
+    const easyTotal  = Math.round((volume - qualityKm - longRunKm) * 10) / 10;
+    const easyCount  = easyDays.size;
+    const easyPerDay = easyCount > 0 ? Math.round((easyTotal / easyCount) * 10) / 10 : 0;
+ 
+    const days = DAYS.map((day, i) => {
+      if (i === restIdx)   return { day, type: "rest",     km: null };
+      if (i === longIdx)   return { day, type: "long_run", km: longRunKm };
+      if (i === qualIdx)   return { day, type: "quality",  km: qualityKm };
+      if (gymDays.has(i))  return { day, type: i === priorityGymDay ? gym1Type : gym2Type, km: null };
+      if (easyDays.has(i)) return { day, type: "easy_run", km: easyPerDay };
+      return                      { day, type: "rest",     km: null };
+    });
+ 
+    return { week: w + 1, volume, isRecovery, days };
+  });
+}
+ 
+// ─── Small UI atoms ───────────────────────────────────────────────────────────
+ 
+function Toggle({ value, onChange, labelOff, labelOn }) {
+  return (
+    <button
+      onClick={() => onChange(!value)}
+      style={{
+        display: "flex", alignItems: "center", gap: 8,
+        background: value ? "#0f172a" : "#e2e8f0",
+        color: value ? "#fff" : "#475569",
+        border: "none", borderRadius: 8, padding: "8px 14px",
+        fontSize: 13, fontWeight: 600, cursor: "pointer",
+        transition: "all 0.15s",
+      }}
+    >
+      <span style={{
+        width: 28, height: 16, borderRadius: 8, position: "relative",
+        background: value ? "#3b82f6" : "#94a3b8", flexShrink: 0,
+        display: "inline-block",
+      }}>
+        <span style={{
+          position: "absolute", top: 2,
+          left: value ? 14 : 2,
+          width: 12, height: 12, borderRadius: "50%", background: "#fff",
+          transition: "left 0.15s",
+        }} />
+      </span>
+      {value ? labelOn : labelOff}
+    </button>
+  );
+}
+ 
+function GymTypeToggle({ label, value, onChange }) {
+  return (
+    <div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        {label}
+      </div>
+      <div style={{ display: "flex", gap: 6 }}>
+        {["gym_strength", "gym_mobility"].map((type) => {
+          const w = WORKOUT[type];
+          const active = value === type;
+          return (
+            <button
+              key={type}
+              onClick={() => onChange(type)}
+              style={{
+                flex: 1, padding: "8px 10px", border: `1.5px solid ${active ? w.color : "#e2e8f0"}`,
+                borderRadius: 8, background: active ? w.bg : "#fff",
+                color: active ? w.color : "#94a3b8",
+                fontSize: 12, fontWeight: 600, cursor: "pointer",
+                transition: "all 0.15s",
+              }}
+            >
+              {w.icon} {type === "gym_strength" ? "Strength" : "Mobility"}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+ 
+// ─── Main component ───────────────────────────────────────────────────────────
+ 
+export default function TrainingPlanBuilder() {
+  const [form, setForm] = useState({
+    currentVolume:   30,
+    goalVolume:      50,
+    progressionRate: 10,
+    longRunDay:  "Saturday",
+    qualityDay:  "Tuesday",
+    restDay:     "Sunday",
+    swapGymOrder: false,
+    gym1Type: "gym_strength",
+    gym2Type: "gym_mobility",
+  });
+ 
+  const [plan, setPlan] = useState(null);
+  const [error, setError] = useState("");
+ 
+  const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+ 
+  const validate = () => {
+    if (form.longRunDay === form.qualityDay || form.longRunDay === form.restDay || form.qualityDay === form.restDay)
+      return "Long run, quality session, and rest day must each be a different day.";
+    if (parseFloat(form.currentVolume) <= 0)
+      return "Current volume must be greater than 0.";
+    if (parseFloat(form.goalVolume) < parseFloat(form.currentVolume))
+      return "Goal volume must be greater than or equal to current volume.";
+    if (parseFloat(form.progressionRate) < 1 || parseFloat(form.progressionRate) > 20)
+      return "Progression rate should be between 1% and 20%.";
+    return "";
+  };
+ 
+  const handleGenerate = () => {
+    const err = validate();
+    if (err) { setError(err); setPlan(null); return; }
+    setError("");
+    setPlan(generatePlan({
+      currentVolume:   parseFloat(form.currentVolume),
+      goalVolume:      parseFloat(form.goalVolume),
+      progressionRate: parseFloat(form.progressionRate),
+      longRunDay:  form.longRunDay,
+      qualityDay:  form.qualityDay,
+      restDay:     form.restDay,
+      swapGymOrder: form.swapGymOrder,
+      gym1Type:    form.gym1Type,
+      gym2Type:    form.gym2Type,
+    }));
+  };
+ 
+  // ── Styles ──────────────────────────────────────────────────────────────────
+  const s = {
+    wrap:   { fontFamily: "'Inter', system-ui, sans-serif", maxWidth: 1100, margin: "0 auto", padding: "32px 20px", color: "#0f172a" },
+    header: { marginBottom: 6, fontSize: 26, fontWeight: 700, letterSpacing: "-0.5px" },
+    sub:    { color: "#64748b", fontSize: 14, marginBottom: 28 },
+    card:   { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 14, padding: "24px", marginBottom: 20 },
+    grid:   { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 16 },
+    label:  { display: "block", fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" },
+    input:  { width: "100%", padding: "9px 12px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 14, background: "#fff", boxSizing: "border-box" },
+    btn:    { background: "#0f172a", color: "#fff", border: "none", padding: "12px 28px", borderRadius: 9, fontSize: 15, fontWeight: 600, cursor: "pointer" },
+    err:    { color: "#dc2626", fontSize: 13, marginBottom: 14, background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px" },
+    divider:{ height: 1, background: "#e2e8f0", margin: "20px 0" },
+    sectionLabel: { fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 },
+  };
+ 
+  const cellStyle = (type) => ({
+    padding: "8px 6px",
+    background: WORKOUT[type].bg,
+    border: `1px solid ${WORKOUT[type].border}`,
+    borderRadius: 8,
+    textAlign: "center",
+    minWidth: 82,
+  });
+ 
+  return (
+    <div style={s.wrap}>
+      <h1 style={s.header}>Training Plan Builder</h1>
+      <p style={s.sub}>16-week progressive running plan · 80/20 intensity split · auto-recovery weeks</p>
+ 
+      {/* ── Form ── */}
+      <div style={s.card}>
+ 
+        {/* Volume & progression */}
+        <div style={s.sectionLabel}>Volume & Progression</div>
+        <div style={s.grid}>
+          {[
+            { label: "Current Volume (km)", key: "currentVolume" },
+            { label: "Goal Volume (km)",    key: "goalVolume" },
+            { label: "Progression (%)",     key: "progressionRate" },
+          ].map(({ label, key }) => (
+            <div key={key}>
+              <label style={s.label}>{label}</label>
+              <input type="number" value={form[key]} onChange={(e) => set(key, e.target.value)} style={s.input} />
+            </div>
+          ))}
+        </div>
+ 
+        <div style={s.divider} />
+ 
+        {/* Anchor days */}
+        <div style={s.sectionLabel}>Anchor Days</div>
+        <div style={s.grid}>
+          {[
+            { label: "Long Run Day",        key: "longRunDay" },
+            { label: "Quality Session Day", key: "qualityDay" },
+            { label: "Rest Day",            key: "restDay" },
+          ].map(({ label, key }) => (
+            <div key={key}>
+              <label style={s.label}>{label}</label>
+              <select value={form[key]} onChange={(e) => set(key, e.target.value)} style={s.input}>
+                {DAYS.map((d) => <option key={d}>{d}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+ 
+        <div style={s.divider} />
+ 
+        {/* Gym configuration */}
+        <div style={s.sectionLabel}>Gym Sessions</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16, alignItems: "end" }}>
+          <GymTypeToggle label="Session 1 — near quality day" value={form.gym1Type} onChange={(v) => set("gym1Type", v)} />
+          <GymTypeToggle label="Session 2 — near long run day" value={form.gym2Type} onChange={(v) => set("gym2Type", v)} />
+          <div>
+            <label style={s.label}>Placement order</label>
+            <Toggle
+              value={form.swapGymOrder}
+              onChange={(v) => set("swapGymOrder", v)}
+              labelOff="Default order"
+              labelOn="Swapped order"
+            />
+            <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6, lineHeight: 1.5 }}>
+              {form.swapGymOrder
+                ? "Session 1 placed before long run · Session 2 after quality"
+                : "Session 1 placed after quality · Session 2 before long run"}
+            </div>
+          </div>
+        </div>
+ 
+        <div style={s.divider} />
+ 
+        {error && <div style={s.err}>⚠️ {error}</div>}
+        <button onClick={handleGenerate} style={s.btn}>Generate Plan →</button>
+      </div>
+ 
+      {/* ── Plan table ── */}
+      {plan && (
+        <div style={s.card}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: "3px 3px" }}>
+              <thead>
+                <tr>
+                  <th style={{ padding: "8px 10px", fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", textAlign: "left" }}>Week</th>
+                  {DAY_SHORT.map((d) => (
+                    <th key={d} style={{ padding: "8px 6px", fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", textAlign: "center" }}>{d}</th>
+                  ))}
+                  <th style={{ padding: "8px 6px", fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", textAlign: "center" }}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plan.map((week) => (
+                  <tr key={week.week}>
+                    <td style={{ padding: "6px 10px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", color: week.isRecovery ? "#94a3b8" : "#0f172a" }}>
+                      W{week.week}
+                      {week.isRecovery && (
+                        <span style={{ marginLeft: 6, fontSize: 10, background: "#e2e8f0", color: "#64748b", borderRadius: 4, padding: "2px 5px", fontWeight: 600 }}>REC</span>
+                      )}
+                    </td>
+                    {week.days.map((day, i) => {
+                      const w = WORKOUT[day.type];
+                      return (
+                        <td key={i} style={cellStyle(day.type)}>
+                          <div style={{ fontSize: 15, lineHeight: 1 }}>{w.icon}</div>
+                          <div style={{ fontSize: 10, fontWeight: 600, color: w.color, marginTop: 3, lineHeight: 1.3 }}>{w.label}</div>
+                          {day.km && <div style={{ fontSize: 12, fontWeight: 700, color: w.color, marginTop: 2 }}>{day.km} km</div>}
+                        </td>
+                      );
+                    })}
+                    <td style={{ padding: "6px 10px", textAlign: "center", fontSize: 13, fontWeight: 700, color: week.isRecovery ? "#94a3b8" : "#0f172a" }}>
+                      {week.volume} km
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+ 
+          {/* Legend */}
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 16, paddingTop: 16, borderTop: "1px solid #e2e8f0" }}>
+            {Object.entries(WORKOUT).map(([key, val]) => (
+              <div key={key} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12 }}>
+                <span>{val.icon}</span>
+                <span style={{ color: val.color, fontWeight: 600 }}>{val.label}</span>
+              </div>
+            ))}
+            <div style={{ fontSize: 12, color: "#94a3b8", marginLeft: "auto" }}>REC = recovery week (70% volume)</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

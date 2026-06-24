@@ -13,27 +13,27 @@ function calcZones(maxHR, restHR) {
 // ── Quality session definitions ───────────────────────────────────────────────
 const QUALITY = {
   hills:     { label:"Hill Repeats",    icon:"⛰️",  color:"#b45309", bg:"#fef3c7", border:"#fcd34d",
-               describe:(km,z)=>`${Math.max(4,Math.round(km/.35))}× hill sprint (~35s uphill). Target ${z.z4.low}–${z.z4.high} bpm. Walk back down as full recovery.` },
+               describe:(km,z)=>`Explosive hill sprints. ${z.z4.low}–${z.z4.high} bpm.` },
   tempo:     { label:"Tempo Run",       icon:"🎯",  color:"#dc2626", bg:"#fee2e2", border:"#fca5a5",
-               describe:(km,z)=>`${km}km sustained effort. Target ${z.z3.low}–${z.z3.high} bpm. Comfortably hard — short sentences only.` },
+               describe:(km,z)=>`Sustained effort. ${z.z3.low}–${z.z3.high} bpm.` },
   extensive: { label:"Ext. Intervals",  icon:"🔁",  color:"#ea580c", bg:"#ffedd5", border:"#fdba74",
-               describe:(km,z)=>`${Math.max(4,Math.round(km/.8))}× 800m at ${z.z4.low}–${z.z4.high} bpm. 90s recovery jog between reps.` },
+               describe:(km,z)=>`Medium repeats. ${z.z4.low}–${z.z4.high} bpm.` },
   hiit:      { label:"Int. Intervals",  icon:"💥",  color:"#9f1239", bg:"#fff1f2", border:"#fda4af",
-               describe:(km,z)=>`${Math.max(4,Math.round(km/.4))}× 400m at ${z.z5.low}+ bpm. Full 3min recovery between reps.` },
+               describe:(km,z)=>`Short sprints. ${z.z5.low}+ bpm.` },
 };
 
 // ── Static workout definitions ────────────────────────────────────────────────
 const STATIC = {
   long_run:     { label:"Long Run",       icon:"🏃", color:"#2563eb", bg:"#dbeafe", border:"#93c5fd",
-                  describe:(km,z)=>`Zone 2 long effort. Stay ${z.z2.low}–${z.z2.high} bpm. Focus on time on feet, not pace.` },
+                  describe:(km,z)=>`Zone 2 effort. ${z.z2.low}–${z.z2.high} bpm.` },
   easy_run:     { label:"Easy Run",       icon:"🌿", color:"#16a34a", bg:"#dcfce7", border:"#86efac",
-                  describe:(km,z)=>`Conversational pace. Zone 2: ${z.z2.low}–${z.z2.high} bpm. If you can't talk freely, slow down.` },
+                  describe:(km,z)=>`Zone 2 recovery. ${z.z2.low}–${z.z2.high} bpm.` },
   gym_strength: { label:"Gym · Strength", icon:"🏋️", color:"#7c3aed", bg:"#ede9fe", border:"#c4b5fd",
-                  describe:()=>"Posterior chain focus. Glutes, hamstrings, single-leg stability, calf raises. No heavy bilateral squats." },
+                  describe:()=>"Strength & posterior chain." },
   gym_mobility: { label:"Gym · Mobility", icon:"🧘", color:"#0891b2", bg:"#e0f2fe", border:"#7dd3fc",
-                  describe:()=>"ROM and activation. Hip flexors, thoracic spine, ankle mobility. 20–30 minutes." },
+                  describe:()=>"ROM & activation." },
   rest:         { label:"Rest",           icon:"💤", color:"#64748b", bg:"#f1f5f9", border:"#cbd5e1",
-                  describe:()=>"Full recovery. Walk, stretch, or do nothing. Trust the process." },
+                  describe:()=>"Full recovery." },
 };
 
 function getMeta(type, qualityType) {
@@ -252,9 +252,9 @@ function WeekCard({ week }) {
           {week.volume} km total
         </span>
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:6, padding:10 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:6, padding:10, width:"100%", boxSizing:"border-box" }}>
         {week.days.map((day, i) => (
-          <div key={i}>
+          <div key={i} style={{ display:"flex", flexDirection:"column" }}>
             <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", textAlign:"center",
               textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:4 }}>
               {DAY_SHORT[i]}

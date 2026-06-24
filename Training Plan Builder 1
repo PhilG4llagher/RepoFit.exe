@@ -1,38 +1,40 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
-const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
-const DAY_SHORT = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+// ─── Constants ────────────────────────────────────────────────────────────────
+const DAYS        = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+const DAY_SHORT   = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const WEEK_OPTIONS = [2, 4, 8, 12, 16];
 
-// ── Karvonen HR zones ─────────────────────────────────────────────────────────
+// ─── Karvonen HR zones ────────────────────────────────────────────────────────
 function calcZones(maxHR, restHR) {
   const r = maxHR - restHR;
   const z = (lo, hi) => ({ low: Math.round(r*lo+restHR), high: Math.round(r*hi+restHR) });
   return { z1:z(.50,.60), z2:z(.60,.70), z3:z(.70,.80), z4:z(.80,.90), z5:z(.90,1.0) };
 }
 
-// ── Quality session definitions ───────────────────────────────────────────────
+// ─── Quality session definitions ──────────────────────────────────────────────
 const QUALITY = {
-  hills:     { label:"Hill Repeats",    icon:"⛰️",  color:"#b45309", bg:"#fef3c7", border:"#fcd34d",
+  hills:     { label:"Hill Repeats",   icon:"⛰️",  color:"#b45309", bg:"#fef3c7", border:"#fcd34d", zone:"z4",
                describe:(km,z)=>`Explosive hill sprints. ${z.z4.low}–${z.z4.high} bpm.` },
-  tempo:     { label:"Tempo Run",       icon:"🎯",  color:"#dc2626", bg:"#fee2e2", border:"#fca5a5",
+  tempo:     { label:"Tempo Run",      icon:"🎯",  color:"#dc2626", bg:"#fee2e2", border:"#fca5a5", zone:"z3",
                describe:(km,z)=>`Sustained effort. ${z.z3.low}–${z.z3.high} bpm.` },
-  extensive: { label:"Ext. Intervals",  icon:"🔁",  color:"#ea580c", bg:"#ffedd5", border:"#fdba74",
+  extensive: { label:"Ext. Intervals", icon:"🔁",  color:"#ea580c", bg:"#ffedd5", border:"#fdba74", zone:"z4",
                describe:(km,z)=>`Medium repeats. ${z.z4.low}–${z.z4.high} bpm.` },
-  hiit:      { label:"Int. Intervals",  icon:"💥",  color:"#9f1239", bg:"#fff1f2", border:"#fda4af",
+  hiit:      { label:"Int. Intervals", icon:"💥",  color:"#9f1239", bg:"#fff1f2", border:"#fda4af", zone:"z5",
                describe:(km,z)=>`Short sprints. ${z.z5.low}+ bpm.` },
 };
 
-// ── Static workout definitions ────────────────────────────────────────────────
+// ─── Static workout definitions ───────────────────────────────────────────────
 const STATIC = {
-  long_run:     { label:"Long Run",       icon:"🏃", color:"#2563eb", bg:"#dbeafe", border:"#93c5fd",
+  long_run:     { label:"Long Run",       icon:"🏃", color:"#2563eb", bg:"#dbeafe", border:"#93c5fd", zone:"z2",
                   describe:(km,z)=>`Zone 2 effort. ${z.z2.low}–${z.z2.high} bpm.` },
-  easy_run:     { label:"Easy Run",       icon:"🌿", color:"#16a34a", bg:"#dcfce7", border:"#86efac",
+  easy_run:     { label:"Easy Run",       icon:"🌿", color:"#16a34a", bg:"#dcfce7", border:"#86efac", zone:"z2",
                   describe:(km,z)=>`Zone 2 recovery. ${z.z2.low}–${z.z2.high} bpm.` },
-  gym_strength: { label:"Gym · Strength", icon:"🏋️", color:"#7c3aed", bg:"#ede9fe", border:"#c4b5fd",
+  gym_strength: { label:"Gym · Strength", icon:"🏋️", color:"#7c3aed", bg:"#ede9fe", border:"#c4b5fd", zone:null,
                   describe:()=>"Strength & posterior chain." },
-  gym_mobility: { label:"Gym · Mobility", icon:"🧘", color:"#0891b2", bg:"#e0f2fe", border:"#7dd3fc",
+  gym_mobility: { label:"Gym · Mobility", icon:"🧘", color:"#0891b2", bg:"#e0f2fe", border:"#7dd3fc", zone:null,
                   describe:()=>"ROM & activation." },
-  rest:         { label:"Rest",           icon:"💤", color:"#64748b", bg:"#f1f5f9", border:"#cbd5e1",
+  rest:         { label:"Rest",           icon:"💤", color:"#64748b", bg:"#f1f5f9", border:"#cbd5e1", zone:null,
                   describe:()=>"Full recovery." },
 };
 
@@ -41,8 +43,8 @@ function getMeta(type, qualityType) {
   return STATIC[type];
 }
 
-// ── Generator ─────────────────────────────────────────────────────────────────
-function generatePlan({ currentVolume, goalVolume, progressionRate,
+// ─── Generator ────────────────────────────────────────────────────────────────
+function generatePlan({ currentVolume, goalVolume, progressionRate, weekCount,
   longRunDay, qualityDay, restDay, swapGymOrder, gym1Type, gym2Type,
   maxHR, restingHR, selectedQuality }) {
 
@@ -52,11 +54,11 @@ function generatePlan({ currentVolume, goalVolume, progressionRate,
   const zones    = calcZones(maxHR, restingHR);
   const rotation = selectedQuality.length > 0 ? selectedQuality : ["extensive"];
 
-  // Volume curve: 3 build weeks → 1 recovery at 70% of last build → repeat
+  // Volume curve
   let build = currentVolume, lastBuild = currentVolume;
   const weekVols = [];
-  for (let w = 0; w < 16; w++) {
-    const rec = (w+1) % 4 === 0;
+  for (let w = 0; w < weekCount; w++) {
+    const rec = weekCount > 3 && (w+1) % 4 === 0;
     if (rec) {
       weekVols.push({ volume: Math.round(lastBuild*.7*10)/10, isRecovery:true });
     } else {
@@ -106,20 +108,32 @@ function generatePlan({ currentVolume, goalVolume, progressionRate,
       return { day, type:"rest", qualityType:null, km:null };
     });
 
-    return { week:w+1, volume, isRecovery, days, zones };
+    // Zone summary for this week
+    const z2km      = days.filter(d => d.type==="easy_run"||d.type==="long_run").reduce((s,d)=>s+(d.km||0),0);
+    const qualityKm = days.filter(d => d.type==="quality").reduce((s,d)=>s+(d.km||0),0);
+
+    return { week:w+1, volume, isRecovery, days, zones, z2km, qualityKm };
   });
 }
 
-// ── UI atoms ──────────────────────────────────────────────────────────────────
+// ─── Export helpers ───────────────────────────────────────────────────────────
+function exportJSON(plan, form) {
+  const blob = new Blob([JSON.stringify({ meta: form, plan }, null, 2)], { type:"application/json" });
+  const a    = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download:"repofit-plan.json" });
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
+function encodeForm(form)  { return btoa(JSON.stringify(form)); }
+function decodeForm(hash)  { try { return JSON.parse(atob(hash.replace(/^#/,""))); } catch { return null; } }
+
+// ─── UI atoms ─────────────────────────────────────────────────────────────────
 function Toggle({ value, onChange, labelOff, labelOn }) {
   return (
     <button onClick={() => onChange(!value)} style={{
       display:"flex", alignItems:"center", gap:8,
-      background: value ? "#0f172a" : "#e2e8f0",
-      color: value ? "#fff" : "#475569",
-      border:"none", borderRadius:8, padding:"8px 14px",
-      fontSize:13, fontWeight:600, cursor:"pointer",
+      background: value ? "#0f172a" : "#e2e8f0", color: value ? "#fff" : "#475569",
+      border:"none", borderRadius:8, padding:"8px 14px", fontSize:13, fontWeight:600, cursor:"pointer",
     }}>
       <span style={{ width:28, height:16, borderRadius:8, position:"relative",
         background: value ? "#3b82f6" : "#94a3b8", flexShrink:0, display:"inline-block" }}>
@@ -141,11 +155,9 @@ function GymTypeToggle({ label, value, onChange }) {
           const m = STATIC[type], active = value===type;
           return (
             <button key={type} onClick={() => onChange(type)} style={{
-              flex:1, padding:"8px 10px",
-              border:`1.5px solid ${active ? m.color : "#e2e8f0"}`,
+              flex:1, padding:"8px 10px", border:`1.5px solid ${active ? m.color : "#e2e8f0"}`,
               borderRadius:8, background: active ? m.bg : "#fff",
-              color: active ? m.color : "#94a3b8",
-              fontSize:12, fontWeight:600, cursor:"pointer",
+              color: active ? m.color : "#94a3b8", fontSize:12, fontWeight:600, cursor:"pointer",
             }}>
               {m.icon} {type==="gym_strength" ? "Strength" : "Mobility"}
             </button>
@@ -158,27 +170,21 @@ function GymTypeToggle({ label, value, onChange }) {
 
 function QualitySelector({ selected, onChange }) {
   const toggle = key => {
-    if (selected.includes(key)) {
-      if (selected.length === 1) return;
-      onChange(selected.filter(k => k!==key));
-    } else {
-      onChange([...selected, key]);
-    }
+    if (selected.includes(key)) { if (selected.length===1) return; onChange(selected.filter(k=>k!==key)); }
+    else onChange([...selected, key]);
   };
   return (
     <div>
       <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", textTransform:"uppercase",
-        letterSpacing:"0.08em", marginBottom:10 }}>Quality Sessions — rotates through selected types each week</div>
+        letterSpacing:"0.08em", marginBottom:10 }}>Quality Sessions — rotates through selected types</div>
       <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
         {Object.entries(QUALITY).map(([key, q]) => {
           const active = selected.includes(key);
           return (
             <button key={key} onClick={() => toggle(key)} style={{
-              padding:"8px 14px",
-              border:`1.5px solid ${active ? q.color : "#e2e8f0"}`,
+              padding:"8px 14px", border:`1.5px solid ${active ? q.color : "#e2e8f0"}`,
               borderRadius:8, background: active ? q.bg : "#fff",
-              color: active ? q.color : "#94a3b8",
-              fontSize:13, fontWeight:600, cursor:"pointer",
+              color: active ? q.color : "#94a3b8", fontSize:13, fontWeight:600, cursor:"pointer",
             }}>
               {q.icon} {q.label}
             </button>
@@ -187,7 +193,7 @@ function QualitySelector({ selected, onChange }) {
       </div>
       {selected.length > 1 && (
         <div style={{ fontSize:11, color:"#94a3b8", marginTop:8 }}>
-          Rotation: {selected.map(k => QUALITY[k].label).join(" → ")} → repeat
+          Rotation: {selected.map(k=>QUALITY[k].label).join(" → ")} → repeat
         </div>
       )}
     </div>
@@ -197,21 +203,43 @@ function QualitySelector({ selected, onChange }) {
 function ZonePreview({ maxHR, restHR }) {
   if (!maxHR || !restHR || maxHR <= restHR) return null;
   const z = calcZones(maxHR, restHR);
-  const rows = [["Z2 · Easy","z2","#16a34a"],["Z3 · Tempo","z3","#ea580c"],
-                ["Z4 · Threshold","z4","#dc2626"],["Z5 · Max","z5","#9f1239"]];
   return (
     <div style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:8, padding:"10px 12px" }}>
       <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", textTransform:"uppercase",
         letterSpacing:"0.07em", marginBottom:8 }}>Zones Preview</div>
-      {rows.map(([lbl,zk,col]) => (
-        <div key={zk} style={{ display:"flex", justifyContent:"space-between",
-          alignItems:"center", marginBottom:4 }}>
+      {[["Z2 · Easy","z2","#16a34a"],["Z3 · Tempo","z3","#ea580c"],["Z4 · Threshold","z4","#dc2626"],["Z5 · Max","z5","#9f1239"]].map(([lbl,zk,col])=>(
+        <div key={zk} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
           <span style={{ fontSize:12, color:col, fontWeight:600 }}>{lbl}</span>
-          <span style={{ fontSize:12, fontFamily:"'Roboto Mono',monospace", color:"#475569" }}>
-            {z[zk].low}–{z[zk].high} bpm
-          </span>
+          <span style={{ fontSize:12, fontFamily:"'Roboto Mono',monospace", color:"#475569" }}>{z[zk].low}–{z[zk].high}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function ZoneSummaryBar({ z2km, qualityKm, volume }) {
+  const gymKm  = Math.round((volume - z2km - qualityKm)*10)/10;
+  const pct    = v => `${Math.round((v/volume)*100)}%`;
+  const segments = [
+    { label:"Z2", km:z2km,      color:"#16a34a" },
+    { label:"Quality", km:qualityKm, color:"#ea580c" },
+    { label:"Gym/Rest", km:gymKm,    color:"#e2e8f0" },
+  ].filter(s => s.km > 0);
+
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 16px",
+      borderTop:"1px solid rgba(255,255,255,0.1)" }}>
+      {/* Stacked bar */}
+      <div style={{ flex:1, height:6, borderRadius:3, overflow:"hidden", display:"flex", background:"#e2e8f0" }}>
+        {segments.map(s => (
+          <div key={s.label} style={{ width:pct(s.km), background:s.color, transition:"width 0.3s" }}/>
+        ))}
+      </div>
+      {/* Labels */}
+      <div style={{ display:"flex", gap:12, fontSize:11, whiteSpace:"nowrap" }}>
+        <span style={{ color:"#86efac", fontWeight:600 }}>Z2 {z2km}km</span>
+        <span style={{ color:"#fdba74", fontWeight:600 }}>Quality {qualityKm}km</span>
+      </div>
     </div>
   );
 }
@@ -221,38 +249,43 @@ function DayCell({ day, zones }) {
   const desc = meta.describe(day.km, zones);
   return (
     <div style={{ background:meta.bg, border:`1px solid ${meta.border}`, borderRadius:10,
-      padding:"10px 8px", display:"flex", flexDirection:"column", gap:3, minHeight:130 }}>
-      <div style={{ fontSize:18 }}>{meta.icon}</div>
+      padding:"10px 8px", display:"flex", flexDirection:"column", gap:3,
+      height:"100%", minHeight:110, boxSizing:"border-box" }}>
+      <div style={{ fontSize:16 }}>{meta.icon}</div>
       <div style={{ fontSize:11, fontWeight:700, color:meta.color, lineHeight:1.3 }}>{meta.label}</div>
       {day.km && (
-        <div style={{ fontSize:14, fontWeight:800, color:meta.color,
-          fontFamily:"'Roboto Mono',monospace" }}>{day.km} km</div>
+        <div style={{ fontSize:13, fontWeight:800, color:meta.color, fontFamily:"'Roboto Mono',monospace" }}>
+          {day.km} km
+        </div>
       )}
-      <div style={{ fontSize:10, color:"#64748b", lineHeight:1.5, marginTop:2 }}>{desc}</div>
+      <div style={{ fontSize:10, color:"#64748b", lineHeight:1.4, marginTop:"auto" }}>{desc}</div>
     </div>
   );
 }
 
 function WeekCard({ week }) {
   return (
-    <div style={{ border:"1px solid #e2e8f0", borderRadius:14, overflow:"hidden",
-      marginBottom:16, background:"#fff", breakInside:"avoid" }}>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-        padding:"12px 16px",
-        background: week.isRecovery ? "#f1f5f9" : "#0f172a",
-        color: week.isRecovery ? "#64748b" : "#fff" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          <span style={{ fontWeight:700, fontSize:15 }}>Week {week.week}</span>
-          {week.isRecovery && (
-            <span style={{ fontSize:11, background:"#e2e8f0", color:"#64748b",
-              borderRadius:4, padding:"2px 7px", fontWeight:700 }}>RECOVERY</span>
-          )}
+    <div className="week-card" style={{ border:"1px solid #e2e8f0", borderRadius:14,
+      overflow:"hidden", marginBottom:16, background:"#fff", breakInside:"avoid", pageBreakInside:"avoid" }}>
+      {/* Header */}
+      <div style={{ background: week.isRecovery ? "#f1f5f9" : "#0f172a", color: week.isRecovery ? "#64748b" : "#fff" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 16px" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <span style={{ fontWeight:700, fontSize:15 }}>Week {week.week}</span>
+            {week.isRecovery && (
+              <span style={{ fontSize:11, background:"rgba(255,255,255,0.15)", color:"#94a3b8",
+                borderRadius:4, padding:"2px 7px", fontWeight:700 }}>RECOVERY</span>
+            )}
+          </div>
+          <span style={{ fontFamily:"'Roboto Mono',monospace", fontWeight:700, fontSize:14 }}>
+            {week.volume} km
+          </span>
         </div>
-        <span style={{ fontFamily:"'Roboto Mono',monospace", fontWeight:700, fontSize:14 }}>
-          {week.volume} km total
-        </span>
+        <ZoneSummaryBar z2km={week.z2km} qualityKm={week.qualityKm} volume={week.volume} />
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:6, padding:10, width:"100%", boxSizing:"border-box" }}>
+      {/* Day grid */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(7, 1fr)",
+        gap:6, padding:10, width:"100%", boxSizing:"border-box" }}>
         {week.days.map((day, i) => (
           <div key={i} style={{ display:"flex", flexDirection:"column" }}>
             <div style={{ fontSize:11, fontWeight:700, color:"#94a3b8", textAlign:"center",
@@ -267,17 +300,41 @@ function WeekCard({ week }) {
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+// ─── Main ─────────────────────────────────────────────────────────────────────
+const DEFAULT_FORM = {
+  currentVolume:30, goalVolume:50, progressionRate:10, weekCount:16,
+  longRunDay:"Saturday", qualityDay:"Tuesday", restDay:"Sunday",
+  swapGymOrder:false, gym1Type:"gym_strength", gym2Type:"gym_mobility",
+  maxHR:190, restingHR:55, selectedQuality:["extensive"],
+};
+
 export default function TrainingPlanBuilder() {
-  const [form, setForm] = useState({
-    currentVolume:30, goalVolume:50, progressionRate:10,
-    longRunDay:"Saturday", qualityDay:"Tuesday", restDay:"Sunday",
-    swapGymOrder:false, gym1Type:"gym_strength", gym2Type:"gym_mobility",
-    maxHR:190, restingHR:55,
-    selectedQuality:["extensive"],
-  });
-  const [plan, setPlan] = useState(null);
-  const [error, setError] = useState("");
+  const [form, setForm]       = useState(DEFAULT_FORM);
+  const [plan, setPlan]       = useState(null);
+  const [error, setError]     = useState("");
+  const [copied, setCopied]   = useState(false);
+
+  // Decode shared URL on mount
+  useEffect(() => {
+    if (window.location.hash) {
+      const decoded = decodeForm(window.location.hash);
+      if (decoded) setForm({ ...DEFAULT_FORM, ...decoded });
+    }
+  }, []);
+
+  // Inject print styles once
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.textContent = `
+      @media print {
+        .no-print { display: none !important; }
+        .week-card { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
+        body { background: white; }
+      }
+    `;
+    document.head.appendChild(style);
+    return () => document.head.removeChild(style);
+  }, []);
 
   const set = (key, val) => setForm(p => ({...p, [key]:val}));
 
@@ -293,6 +350,28 @@ export default function TrainingPlanBuilder() {
     return "";
   };
 
+  const handleGenerate = () => {
+    const err = validate();
+    if (err) { setError(err); setPlan(null); return; }
+    setError("");
+    setPlan(generatePlan({
+      currentVolume:parseFloat(form.currentVolume), goalVolume:parseFloat(form.goalVolume),
+      progressionRate:parseFloat(form.progressionRate), weekCount:parseInt(form.weekCount),
+      longRunDay:form.longRunDay, qualityDay:form.qualityDay, restDay:form.restDay,
+      swapGymOrder:form.swapGymOrder, gym1Type:form.gym1Type, gym2Type:form.gym2Type,
+      maxHR:parseFloat(form.maxHR), restingHR:parseFloat(form.restingHR),
+      selectedQuality:form.selectedQuality,
+    }));
+  };
+
+  const handleShare = () => {
+    const url = `${window.location.origin}${window.location.pathname}#${encodeForm(form)}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   const s = {
     wrap:     { fontFamily:"'Inter',system-ui,sans-serif", maxWidth:1100, margin:"0 auto", padding:"32px 20px", color:"#0f172a" },
     header:   { marginBottom:6, fontSize:26, fontWeight:700, letterSpacing:"-0.5px" },
@@ -303,21 +382,30 @@ export default function TrainingPlanBuilder() {
                 textTransform:"uppercase", letterSpacing:"0.05em" },
     input:    { width:"100%", padding:"9px 12px", border:"1px solid #cbd5e1", borderRadius:8,
                 fontSize:14, background:"#fff", boxSizing:"border-box" },
-    btn:      { background:"#0f172a", color:"#fff", border:"none", padding:"12px 28px",
-                borderRadius:9, fontSize:15, fontWeight:600, cursor:"pointer" },
-    err:      { color:"#dc2626", fontSize:13, marginBottom:14, background:"#fef2f2",
-                border:"1px solid #fecaca", borderRadius:8, padding:"10px 14px" },
     divider:  { height:1, background:"#e2e8f0", margin:"20px 0" },
     secLabel: { fontSize:11, fontWeight:700, color:"#94a3b8", textTransform:"uppercase",
                 letterSpacing:"0.08em", marginBottom:12 },
+    btnPrimary: { background:"#0f172a", color:"#fff", border:"none", padding:"11px 24px",
+                  borderRadius:9, fontSize:14, fontWeight:600, cursor:"pointer" },
+    btnSecondary: { background:"#fff", color:"#475569", border:"1px solid #e2e8f0", padding:"11px 24px",
+                    borderRadius:9, fontSize:14, fontWeight:600, cursor:"pointer" },
+    err:      { color:"#dc2626", fontSize:13, marginBottom:14, background:"#fef2f2",
+                border:"1px solid #fecaca", borderRadius:8, padding:"10px 14px" },
   };
+
+  const pillStyle = (active) => ({
+    padding:"8px 16px", borderRadius:20, border:"none", cursor:"pointer", fontWeight:600,
+    fontSize:13, background: active ? "#0f172a" : "#e2e8f0", color: active ? "#fff" : "#64748b",
+  });
 
   return (
     <div style={s.wrap}>
       <h1 style={s.header}>Training Plan Builder</h1>
-      <p style={s.sub}>16-week progressive plan · 80/20 split · Karvonen HR zones · auto-recovery weeks</p>
+      <p style={s.sub}>Progressive running plan · 80/20 split · Karvonen HR zones · auto-recovery weeks</p>
 
-      <div style={s.card}>
+      <div className="no-print" style={s.card}>
+
+        {/* Volume & progression */}
         <div style={s.secLabel}>Volume & Progression</div>
         <div style={s.grid}>
           {[["Current Volume (km)","currentVolume"],["Goal Volume (km)","goalVolume"],["Progression (%)","progressionRate"]].map(([lbl,key])=>(
@@ -330,6 +418,19 @@ export default function TrainingPlanBuilder() {
 
         <div style={s.divider}/>
 
+        {/* Week count */}
+        <div style={s.secLabel}>Plan Length</div>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+          {WEEK_OPTIONS.map(n => (
+            <button key={n} onClick={() => set("weekCount", n)} style={pillStyle(form.weekCount===n)}>
+              {n} {n===1 ? "week" : "weeks"}
+            </button>
+          ))}
+        </div>
+
+        <div style={s.divider}/>
+
+        {/* Heart rate */}
         <div style={s.secLabel}>Heart Rate — Karvonen Formula</div>
         <div style={s.grid}>
           {[["Max Heart Rate (bpm)","maxHR"],["Resting Heart Rate (bpm)","restingHR"]].map(([lbl,key])=>(
@@ -343,6 +444,7 @@ export default function TrainingPlanBuilder() {
 
         <div style={s.divider}/>
 
+        {/* Anchor days */}
         <div style={s.secLabel}>Anchor Days</div>
         <div style={s.grid}>
           {[["Long Run Day","longRunDay"],["Quality Session Day","qualityDay"],["Rest Day","restDay"]].map(([lbl,key])=>(
@@ -359,13 +461,16 @@ export default function TrainingPlanBuilder() {
         <QualitySelector selected={form.selectedQuality} onChange={v=>set("selectedQuality",v)}/>
 
         <div style={s.divider}/>
+
+        {/* Gym */}
         <div style={s.secLabel}>Gym Sessions</div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:16, alignItems:"end" }}>
           <GymTypeToggle label="Session 1 — near quality day"  value={form.gym1Type} onChange={v=>set("gym1Type",v)}/>
           <GymTypeToggle label="Session 2 — near long run day" value={form.gym2Type} onChange={v=>set("gym2Type",v)}/>
           <div>
             <label style={s.label}>Placement order</label>
-            <Toggle value={form.swapGymOrder} onChange={v=>set("swapGymOrder",v)} labelOff="Default order" labelOn="Swapped order"/>
+            <Toggle value={form.swapGymOrder} onChange={v=>set("swapGymOrder",v)}
+              labelOff="Default order" labelOn="Swapped order"/>
             <div style={{ fontSize:11, color:"#94a3b8", marginTop:6, lineHeight:1.5 }}>
               {form.swapGymOrder
                 ? "Session 1 before long run · Session 2 after quality"
@@ -376,19 +481,20 @@ export default function TrainingPlanBuilder() {
 
         <div style={s.divider}/>
         {error && <div style={s.err}>⚠️ {error}</div>}
-        <button onClick={() => {
-          const err = validate();
-          if (err) { setError(err); setPlan(null); return; }
-          setError("");
-          setPlan(generatePlan({
-            currentVolume:parseFloat(form.currentVolume), goalVolume:parseFloat(form.goalVolume),
-            progressionRate:parseFloat(form.progressionRate),
-            longRunDay:form.longRunDay, qualityDay:form.qualityDay, restDay:form.restDay,
-            swapGymOrder:form.swapGymOrder, gym1Type:form.gym1Type, gym2Type:form.gym2Type,
-            maxHR:parseFloat(form.maxHR), restingHR:parseFloat(form.restingHR),
-            selectedQuality:form.selectedQuality,
-          }));
-        }} style={s.btn}>Generate Plan →</button>
+
+        {/* Action buttons */}
+        <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+          <button onClick={handleGenerate} style={s.btnPrimary}>Generate Plan →</button>
+          {plan && <>
+            <button onClick={() => exportJSON(plan, form)} style={s.btnSecondary}>↓ Export JSON</button>
+            <button onClick={() => window.print()} style={s.btnSecondary}>🖨 Print</button>
+            <button onClick={handleShare} style={{ ...s.btnSecondary,
+              color: copied ? "#16a34a" : "#475569",
+              borderColor: copied ? "#86efac" : "#e2e8f0" }}>
+              {copied ? "✓ Copied!" : "⎘ Share Link"}
+            </button>
+          </>}
+        </div>
       </div>
 
       {plan && plan.map(week => <WeekCard key={week.week} week={week}/>)}
